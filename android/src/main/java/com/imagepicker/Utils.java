@@ -401,12 +401,15 @@ public class Utils {
     }
 
 
-    private static String resolveRealPath(Activity activity, Uri uri, boolean isCamera) throws IOException {
+    private static String resolveRealPath(Activity activity, Uri uri, boolean isCamera, String fileName, Context context) throws IOException {
         String path;
 
         if (isCamera) {
-//                Uri mediaUri = Uri.parse(uri);
-            path = uri.getPath();
+            File tempPath = activity.getFilesDir();
+            File image = File.createTempFile(fileName, ".jpg", tempPath);
+            String mCurrentMediaPath = "file:" + image.getAbsolutePath();
+            Uri mediaUri = Uri.parse(mCurrentMediaPath);
+            path = mediaUri.getPath();
         } else {
             path = RealPathUtil.getRealPathFromURI(activity, uri);
         }
@@ -504,7 +507,7 @@ public class Utils {
 
         if (options.includeExtra) {
             try {
-                String path = resolveRealPath(activity, uri, isCamera);
+                String path = resolveRealPath(activity, uri, isCamera, fileName, context);
                 if (path == null || path.isEmpty()) {
                     throw new Exception("Cannot resolve asset path.");
                 }
