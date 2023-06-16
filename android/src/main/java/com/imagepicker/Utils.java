@@ -414,8 +414,7 @@ public class Utils {
             path = RealPathUtil.getRealPathFromURI(activity, uri);
         }
 
-        System.out.println(Build.VERSION.SDK_INT + "Saumya");
-        Log.e("SDKINT", String.valueOf(Build.VERSION.SDK_INT));
+
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
 

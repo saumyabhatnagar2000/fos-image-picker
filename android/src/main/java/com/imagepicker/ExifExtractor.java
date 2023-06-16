@@ -26,7 +26,6 @@ class ExifExtractor {
         }
 
         ExifInterface exif = new ExifInterface(path);
-        Log.d("IMAGE_PATH", path);
 
         try {
             GeoDegree geoDegree = new GeoDegree(exif);
