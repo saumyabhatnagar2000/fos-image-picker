@@ -415,7 +415,6 @@ public class Utils {
         }
 
 
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
 
             String externalCacheDirPath = Uri.fromFile(activity.getExternalCacheDir()).getPath();
