@@ -117,7 +117,7 @@ def resolveReactNativeDirectory() {
     }
 
     throw new Exception(
-            "[react-native-image-picker] Unable to resolve react-native location in " +
+            "[fos-image-picker] Unable to resolve react-native location in " +
                     "node_modules. You should add project extension property (in app/build.gradle) " +
                     "`REACT_NATIVE_NODE_MODULES_DIR` with path to react-native."
     )
