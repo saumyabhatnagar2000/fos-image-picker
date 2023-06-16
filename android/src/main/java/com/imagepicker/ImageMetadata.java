@@ -8,7 +8,8 @@ import java.io.InputStream;
 
 public class ImageMetadata extends Metadata {
   public ImageMetadata(Uri uri, Context context) {
-    try(InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
+    try {
+      InputStream inputStream = context.getContentResolver().openInputStream(uri);
       ExifInterface exif = new ExifInterface(inputStream);
       String datetimeTag = exif.getAttribute(ExifInterface.TAG_DATETIME);
 
@@ -22,7 +23,7 @@ public class ImageMetadata extends Metadata {
 
   @Override
   public String getDateTime() { return datetime; }
-
+  
   // At the moment we are not using the ImageMetadata class to get width/height
   // TODO: to use this class for extracting image width and height in the future
   @Override

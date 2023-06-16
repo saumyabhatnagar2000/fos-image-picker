@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.util.Log;
 import android.webkit.MimeTypeMap;
 
 import androidx.annotation.Nullable;
@@ -31,6 +32,7 @@ import com.facebook.react.bridge.WritableMap;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -40,7 +42,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-import static com.imagepicker.ImagePickerModuleImpl.*;
+import static com.imagepicker.ImagePickerModule.*;
 
 public class Utils {
     public static String fileNamePrefix = "rn_image_picker_lib_temp_";
@@ -56,7 +58,7 @@ public class Utils {
 
     public static File createFile(Context reactContext, String fileType) {
         try {
-            String filename = fileNamePrefix  + UUID.randomUUID() + "." + fileType;
+            String filename = fileNamePrefix + UUID.randomUUID() + "." + fileType;
 
             // getCacheDir will auto-clean according to android docs
             File fileDir = reactContext.getCacheDir();
@@ -95,8 +97,9 @@ public class Utils {
     }
 
     public static void copyUri(Uri fromUri, Uri toUri, ContentResolver resolver) {
-        try(OutputStream os = resolver.openOutputStream(toUri);
-            InputStream is = resolver.openInputStream(fromUri)) {
+        try {
+            OutputStream os = resolver.openOutputStream(toUri);
+            InputStream is = resolver.openInputStream(fromUri);
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -104,6 +107,7 @@ public class Utils {
             while ((bytesRead = is.read(buffer)) != -1) {
                 os.write(buffer, 0, bytesRead);
             }
+
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -116,7 +120,7 @@ public class Utils {
         }
         ContentResolver contentResolver = context.getContentResolver();
         String fileType = getFileTypeFromMime(contentResolver.getType(sharedStorageUri));
-        Uri toUri =  Uri.fromFile(createFile(context, fileType));
+        Uri toUri = Uri.fromFile(createFile(context, fileType));
         copyUri(sharedStorageUri, toUri, contentResolver);
         return toUri;
     }
@@ -139,38 +143,47 @@ public class Utils {
     }
 
     public static int[] getImageDimensions(Uri uri, Context reactContext) {
-        try(InputStream inputStream = reactContext.getContentResolver().openInputStream(uri)) {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            BitmapFactory.decodeStream(inputStream,null, options);
-            return new int[]{options.outWidth, options.outHeight};
-        } catch (IOException e) {
+        InputStream inputStream;
+        try {
+            inputStream = reactContext.getContentResolver().openInputStream(uri);
+        } catch (FileNotFoundException e) {
             e.printStackTrace();
             return new int[]{0, 0};
         }
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inJustDecodeBounds = true;
+        BitmapFactory.decodeStream(inputStream, null, options);
+        return new int[]{options.outWidth, options.outHeight};
     }
 
     static boolean hasPermission(final Activity activity) {
         final int writePermission = ActivityCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        return writePermission == PackageManager.PERMISSION_GRANTED ? true : false;
+        return writePermission == PackageManager.PERMISSION_GRANTED;
     }
 
     static String getBase64String(Uri uri, Context reactContext) {
-        try(InputStream inputStream = reactContext.getContentResolver().openInputStream(uri);
-            ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] bytes;
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                output.write(buffer, 0, bytesRead);
-            }
-            bytes = output.toByteArray();
-            return Base64.encodeToString(bytes, Base64.NO_WRAP);
-        } catch (IOException e) {
+        InputStream inputStream;
+        try {
+            inputStream = reactContext.getContentResolver().openInputStream(uri);
+        } catch (FileNotFoundException e) {
             e.printStackTrace();
             return null;
         }
+
+        byte[] bytes;
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try {
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                output.write(buffer, 0, bytesRead);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        bytes = output.toByteArray();
+        return Base64.encodeToString(bytes, Base64.NO_WRAP);
     }
 
     // Resize image
@@ -185,25 +198,20 @@ public class Utils {
 
             int[] newDimens = getImageDimensBasedOnConstraints(origDimens[0], origDimens[1], options);
 
-            try(InputStream imageStream = context.getContentResolver().openInputStream(uri)) {
-                String mimeType =  getMimeTypeFromFileUri(uri);
-                Bitmap b = BitmapFactory.decodeStream(imageStream);
+            InputStream imageStream = context.getContentResolver().openInputStream(uri);
+            String mimeType = getMimeTypeFromFileUri(uri);
+            Bitmap b = BitmapFactory.decodeStream(imageStream);
+            b = Bitmap.createScaledBitmap(b, newDimens[0], newDimens[1], true);
+            String originalOrientation = getOrientation(uri, context);
 
-                b = Bitmap.createScaledBitmap(b, newDimens[0], newDimens[1], true);
-                String originalOrientation = getOrientation(uri, context);
+            File file = createFile(context, getFileTypeFromMime(mimeType));
+            OutputStream os = context.getContentResolver().openOutputStream(Uri.fromFile(file));
+            b.compress(getBitmapCompressFormat(mimeType), options.quality, os);
+            setOrientation(file, originalOrientation, context);
 
-                File file = createFile(context, getFileTypeFromMime(mimeType));
+            deleteFile(uri);
 
-                try(OutputStream os = context.getContentResolver().openOutputStream(Uri.fromFile(file))) {
-                    b.compress(getBitmapCompressFormat(mimeType), options.quality, os);
-                }
-
-                setOrientation(file, originalOrientation, context);
-
-                deleteFile(uri);
-
-                return Uri.fromFile(file);
-            }
+            return Uri.fromFile(file);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -248,7 +256,8 @@ public class Utils {
     }
 
     static double getFileSize(Uri uri, Context context) {
-        try(ParcelFileDescriptor f = context.getContentResolver().openFileDescriptor(uri, "r")) {
+        try {
+            ParcelFileDescriptor f = context.getContentResolver().openFileDescriptor(uri, "r");
             return f.getStatSize();
         } catch (Exception e) {
             e.printStackTrace();
@@ -270,8 +279,10 @@ public class Utils {
 
     static Bitmap.CompressFormat getBitmapCompressFormat(String mimeType) {
         switch (mimeType) {
-            case "image/jpeg": return Bitmap.CompressFormat.JPEG;
-            case "image/png": return Bitmap.CompressFormat.PNG;
+            case "image/jpeg":
+                return Bitmap.CompressFormat.JPEG;
+            case "image/png":
+                return Bitmap.CompressFormat.PNG;
         }
         return Bitmap.CompressFormat.JPEG;
     }
@@ -281,11 +292,14 @@ public class Utils {
             return "jpg";
         }
         switch (mimeType) {
-            case "image/jpeg": return "jpg";
-            case "image/png": return "png";
-            case "image/gif": return "gif";
+            case "image/jpeg":
+                return "jpg";
+            case "image/png":
+                return "png";
+            case "image/gif":
+                return "gif";
         }
-        return MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType);
+        return "jpg";
     }
 
     static void deleteFile(Uri uri) {
@@ -301,8 +315,10 @@ public class Utils {
         switch (requestCode) {
             case REQUEST_LAUNCH_IMAGE_CAPTURE:
             case REQUEST_LAUNCH_VIDEO_CAPTURE:
-            case REQUEST_LAUNCH_LIBRARY: return true;
-            default: return false;
+            case REQUEST_LAUNCH_LIBRARY:
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -310,13 +326,13 @@ public class Utils {
     // https://issuetracker.google.com/issues/37063818
     public static boolean isCameraPermissionFulfilled(Context context, Activity activity) {
         try {
-             String[] declaredPermissions = context.getPackageManager()
-                     .getPackageInfo(context.getPackageName(), PackageManager.GET_PERMISSIONS)
-                     .requestedPermissions;
+            String[] declaredPermissions = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), PackageManager.GET_PERMISSIONS)
+                    .requestedPermissions;
 
-             if (declaredPermissions == null) {
-                 return true;
-             }
+            if (declaredPermissions == null) {
+                return true;
+            }
 
             if (Arrays.asList(declaredPermissions).contains(Manifest.permission.CAMERA)
                     && ActivityCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -332,39 +348,39 @@ public class Utils {
     }
 
     static boolean isImageType(Uri uri, Context context) {
-      return Utils.isContentType("image/", uri, context);
+        return Utils.isContentType("image/", uri, context);
     }
 
     static boolean isVideoType(Uri uri, Context context) {
         return Utils.isContentType("video/", uri, context);
     }
 
-  /**
-   * Verifies the content typs of a file URI. A helper function
-   * for isVideoType and isImageType
-   *
-   * @param contentMimeType - "video/" or "image/"
-   * @param uri - file uri
-   * @param context - react context
-   * @return a boolean to determine if file is of specified content type i.e. image or video
-   */
+    /**
+     * Verifies the content typs of a file URI. A helper function
+     * for isVideoType and isImageType
+     *
+     * @param contentMimeType - "video/" or "image/"
+     * @param uri             - file uri
+     * @param context         - react context
+     * @return a boolean to determine if file is of specified content type i.e. image or video
+     */
     static boolean isContentType(String contentMimeType, Uri uri, Context context) {
-      final String mimeType = getMimeType(uri, context);
+        final String mimeType = getMimeType(uri, context);
 
-      if(mimeType != null) {
-        return mimeType.contains(contentMimeType);
-      }
+        if (mimeType != null) {
+            return mimeType.contains(contentMimeType);
+        }
 
-      return false;
+        return false;
     }
 
     static @Nullable String getMimeType(Uri uri, Context context) {
-      if (uri.getScheme().equals("file")) {
-        return getMimeTypeFromFileUri(uri);
-      }
+        if (uri.getScheme().equals("file")) {
+            return getMimeTypeFromFileUri(uri);
+        }
 
-      ContentResolver contentResolver = context.getContentResolver();
-      return contentResolver.getType(uri);
+        ContentResolver contentResolver = context.getContentResolver();
+        return contentResolver.getType(uri);
     }
 
     static List<Uri> collectUrisFromData(Intent data) {
@@ -384,7 +400,90 @@ public class Utils {
         return fileUris;
     }
 
-    static ReadableMap getImageResponseMap(Uri uri, Options options, Context context) {
+
+    private static String resolveRealPath(Activity activity, Uri uri, boolean isCamera) throws IOException {
+        String path;
+
+        if (isCamera) {
+//                Uri mediaUri = Uri.parse(uri);
+            path = uri.getPath();
+        } else {
+            path = RealPathUtil.getRealPathFromURI(activity, uri);
+        }
+
+        System.out.println(Build.VERSION.SDK_INT + "Saumya");
+        Log.e("SDKINT", String.valueOf(Build.VERSION.SDK_INT));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+
+            String externalCacheDirPath = Uri.fromFile(activity.getExternalCacheDir()).getPath();
+            String externalFilesDirPath = Uri.fromFile(activity.getExternalFilesDir(null)).getPath();
+            String cacheDirPath = Uri.fromFile(activity.getCacheDir()).getPath();
+            String FilesDirPath = Uri.fromFile(activity.getFilesDir()).getPath();
+
+            if (!path.startsWith(externalCacheDirPath)
+                    && !path.startsWith(externalFilesDirPath)
+                    && !path.startsWith(cacheDirPath)
+                    && !path.startsWith(FilesDirPath)) {
+                File copiedFile = createExternalStoragePrivateFile(activity, uri);
+                path = RealPathUtil.getRealPathFromURI(activity, Uri.fromFile(copiedFile));
+            }
+        }
+
+        return path;
+    }
+
+    public static String getExtension(Context context, Uri uri) {
+        String extension;
+
+        //Check uri format to avoid null
+        if (uri.getScheme().equals(ContentResolver.SCHEME_CONTENT)) {
+            //If scheme is a content
+            final MimeTypeMap mime = MimeTypeMap.getSingleton();
+            extension = mime.getExtensionFromMimeType(context.getContentResolver().getType(uri));
+        } else {
+            //If scheme is a File
+            //This will replace white spaces with %20 and also other special characters. This will avoid returning null values on file name with spaces and special characters.
+            extension = MimeTypeMap.getFileExtensionFromUrl(Uri.fromFile(new File(uri.getPath())).toString());
+
+        }
+
+        return extension;
+    }
+
+    private static File createExternalStoragePrivateFile(Context context, Uri uri) throws FileNotFoundException {
+        InputStream inputStream = context.getContentResolver().openInputStream(uri);
+
+        String extension = getExtension(context, uri);
+        File file = new File(context.getExternalCacheDir(), "/temp/" + System.currentTimeMillis() + "." + extension);
+        File parentFile = file.getParentFile();
+        if (parentFile != null) {
+            parentFile.mkdirs();
+        }
+
+        try {
+            // Very simple code to copy a picture from the application's
+            // resource into the external file.  Note that this code does
+            // no error checking, and assumes the picture is small (does not
+            // try to copy it in chunks).  Note that if external storage is
+            // not currently mounted this will silently fail.
+            OutputStream outputStream = new FileOutputStream(file);
+            byte[] data = new byte[inputStream.available()];
+            inputStream.read(data);
+            outputStream.write(data);
+            inputStream.close();
+            outputStream.close();
+        } catch (IOException e) {
+            // Unable to create file, likely because external storage is
+            // not currently mounted.
+            Log.w("image-crop-picker", "Error writing " + file, e);
+        }
+
+        return file;
+    }
+
+
+    static ReadableMap getImageResponseMap(Uri uri, Options options, Context context, Activity activity, boolean isCamera) throws IOException {
         String fileName = uri.getLastPathSegment();
         ImageMetadata imageMetadata = new ImageMetadata(uri, context);
         int[] dimensions = getImageDimensions(uri, context);
@@ -401,17 +500,29 @@ public class Utils {
         if (options.includeBase64) {
             map.putString("base64", getBase64String(uri, context));
         }
+        new ExifInterface(context.getContentResolver().openInputStream(uri));
 
-        if(options.includeExtra) {
-          // Add more extra data here ...
-          map.putString("timestamp", imageMetadata.getDateTime());
-          map.putString("id", fileName);
+        if (options.includeExtra) {
+            try {
+                String path = resolveRealPath(activity, uri, isCamera);
+                if (path == null || path.isEmpty()) {
+                    throw new Exception("Cannot resolve asset path.");
+                }
+                WritableMap exifMap = ExifExtractor.extract(path);
+                map.putMap("exif", exifMap);
+            } catch (Exception e) {
+
+                e.printStackTrace();
+            }
+            // Add more extra data here ...
+            map.putString("timestamp", imageMetadata.getDateTime());
+            map.putString("id", fileName);
         }
 
         return map;
     }
 
-    static ReadableMap getVideoResponseMap(Uri uri, Options options, Context context) {
+    static ReadableMap getVideoResponseMap(Uri uri, Options options, Context context, Activity activity) {
         String fileName = uri.getLastPathSegment();
         WritableMap map = Arguments.createMap();
         VideoMetadata videoMetadata = new VideoMetadata(uri, context);
@@ -425,33 +536,29 @@ public class Utils {
         map.putInt("width", videoMetadata.getWidth());
         map.putInt("height", videoMetadata.getHeight());
 
-        if(options.includeExtra) {
-          // Add more extra data here ...
-          map.putString("timestamp", videoMetadata.getDateTime());
-          map.putString("id", fileName);
+        if (options.includeExtra) {
+            // Add more extra data here ...
+            map.putString("timestamp", videoMetadata.getDateTime());
+            map.putString("id", fileName);
         }
 
         return map;
     }
 
-    static ReadableMap getResponseMap(List<Uri> fileUris, Options options, Context context) throws RuntimeException {
+    static ReadableMap getResponseMap(List<Uri> fileUris, Options options, Context context, final Activity activity, boolean isCamera) throws RuntimeException, IOException {
         WritableArray assets = Arguments.createArray();
 
-        for(int i = 0; i < fileUris.size(); ++i) {
+        for (int i = 0; i < fileUris.size(); ++i) {
             Uri uri = fileUris.get(i);
 
-            // Call getAppSpecificStorageUri in the if block to avoid copying unsupported files
             if (isImageType(uri, context)) {
-                if (uri.getScheme().contains("content")) {
-                    uri = getAppSpecificStorageUri(uri, context);
-                }
+//                if (uri.getScheme().contains("content")) {
+//                    uri = getAppSpecificStorageUri(uri, context);
+//                }
                 uri = resizeImage(uri, context, options);
-                assets.pushMap(getImageResponseMap(uri, options, context));
+                assets.pushMap(getImageResponseMap(uri, options, context, activity, isCamera));
             } else if (isVideoType(uri, context)) {
-                if (uri.getScheme().contains("content")) {
-                    uri = getAppSpecificStorageUri(uri, context);
-                }
-                assets.pushMap(getVideoResponseMap(uri, options, context));
+                assets.pushMap(getVideoResponseMap(uri, options, context, activity));
             } else {
                 throw new RuntimeException("Unsupported file type");
             }
